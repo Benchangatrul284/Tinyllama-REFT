@@ -44,5 +44,3 @@ def count_elements(s):
             count[word] = count.get(word, 0) + 1
             total_words += 1  # Count each English word as a word
     return count, total_words, len(count.keys()), len(count.keys())/ total_words
-# Upload the dataset to the hub
-# dataset.push_to_hub('benchang1110/Chattw_v2', token='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')
