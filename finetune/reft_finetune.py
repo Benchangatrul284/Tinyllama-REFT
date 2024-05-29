@@ -6,8 +6,7 @@ import torch
 import transformers
 import argparse
 import pyreft
-from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaConfig, TrainingArguments, Trainer
-from transformers import DataCollatorForLanguageModeling
+from transformers import  TrainingArguments
 import transformers
 import torch
 import argparse
@@ -22,7 +21,7 @@ torch.cuda.empty_cache()
 IGNORE_INDEX = -100
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--model_name_or_path", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
+parser.add_argument("--model_name_or_path", type=str, default="benchang1110/Taiwan-tinyllama-v1.0-chat")
 parser.add_argument("--device", type=str, default="cuda")
 parser.add_argument("--max_length", type=int, default=2048)
 parser.add_argument("--layers", type=str, default="all")
@@ -69,35 +68,9 @@ class ReftChatDataset(ReftDataset):
         
         def load_dataset(self):
             """Load the dataset from HF or a local file. to self.task_dataset."""
-            # # load the dataset
-            # if self.dataset is None:
-            #     if self.data_path is None: # we use the default dataset
-            #         task_dataset = datasets.load_dataset(self.task, split=self.data_split)
-            #         print("loading data for dataset: ", self.task)
-            #     elif self.data_path.endswith(".json"):
-            #         task_dataset = datasets.load_dataset("json", data_files=self.data_path, split="train")
-            #     else:
-            #         task_dataset = datasets.load_dataset(self.task, self.data_path, split=self.data_split)
-            # else:
-            #     task_dataset = self.dataset
 
-            # # select n random examples if specificed
-            # if self.max_n_example is not None:
-            #     task_dataset = task_dataset.shuffle(seed=self.seed)
-            #     task_dataset = task_dataset.select(range(self.max_n_example))
-
-            # # save raw_dataset pointer for access raw strings
-            # self.raw_dataset = task_dataset if self.data_split != "train" else None
-            medical_dataset_train = datasets.load_dataset('NeroUCH/online-health-chating',split=self.data_split)
-            medical_dataset_test = datasets.load_dataset('NeroUCH/online-health-chating',split='validation')
-            medical_dataset_train = medical_dataset_train.map(map_to_template,batched=True,remove_columns=['question','answer'],batch_size=10000,num_proc=32)
-            medical_dataset_test = medical_dataset_test.map(map_to_template,batched=True,remove_columns=['question','answer'],batch_size=10000,num_proc=32)
-            medical_dataset = datasets.concatenate_datasets([medical_dataset_train,medical_dataset_test])
             
-            dataset1 = datasets.load_dataset(self.task[0], split=self.data_split)
-            dataset2 = datasets.load_dataset(self.task[1], split=self.data_split).select_columns(["conversation"])
-            
-            task_dataset = datasets.concatenate_datasets([dataset1, dataset2])
+            task_dataset = datasets.load_dataset(self.task[0], split=self.data_split)
             task_dataset = task_dataset.shuffle()
             
             # select n random examples if specificed
@@ -140,9 +113,7 @@ class ReftChatDataset(ReftDataset):
             text = data_item["formatted_chat"]
             # this must set according to chat template
             # tinyllama
-            # base_prompt = text.split("<|assistant|>\n")[0] + "<|assistant|>\n"
-            # llama 3
-            base_prompt = text.split("<|start_header_id|>assistant<|end_header_id|>\n\n")[0] + "<|start_header_id|>assistant<|end_header_id|>\n\n"
+            base_prompt = text.split("<|assistant|>\n")[0] + "<|assistant|>\n"
             # print(base_prompt)
             prompt_ids = self.tokenizer(base_prompt, max_length=self.tokenizer.model_max_length,
                 truncation=True, return_tensors="pt")["input_ids"][0]
@@ -165,7 +136,6 @@ if __name__ == "__main__":
     model = transformers.AutoModelForCausalLM.from_pretrained(args.model_name_or_path,torch_dtype=torch.bfloat16,attn_implementation="flash_attention_2",device_map=args.device)
     tokenizer = transformers.AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=False)
     tokenizer.model_max_length = args.max_length
-    tokenizer.pad_token = tokenizer.eos_token
     # print(model.layers)
     # model.resize_token_embeddings(len(tokenizer))
     
@@ -181,21 +151,20 @@ if __name__ == "__main__":
     if "+" in args.position and not args.share_weights:
         layers += layers
     
-    # print(layers)
     
     # this is a brute force way to intervene on all layers (not optimal)
-    representations = [{
-        "layer": l, "component": "block_output","low_rank_dimension": args.rank,
-        "intervention": pyreft.LoreftIntervention(
-            embed_dim=model.config.hidden_size, 
-            low_rank_dimension=args.rank,
-        )
-    } for l in layers]
-    
-    # representations= [{
-    #     "component": f"model.layers[{l}].mlp.output", # string access to the model component
+    # representations = [{
+    #     "layer": l, "component": "block_output","low_rank_dimension": args.rank,
     #     "intervention": pyreft.LoreftIntervention(
-    #     embed_dim=model.config.hidden_size, low_rank_dimension=args.rank)} for l in layers]
+    #         embed_dim=model.config.hidden_size, 
+    #         low_rank_dimension=args.rank,
+    #     )
+    # } for l in layers]
+    
+    representations= [{
+        "component": f"model.layers[{l}].mlp.output", # string access to the model component
+        "intervention": pyreft.LoreftIntervention(
+        embed_dim=model.config.hidden_size, low_rank_dimension=args.rank)} for l in layers]
     
     reft_config = pyreft.ReftConfig(representations=representations)
     reft_model = pyreft.get_reft_model(model, reft_config)
@@ -204,7 +173,7 @@ if __name__ == "__main__":
     
     # ##---------------------------------data processing----------------------
     # note we don't need to apply the chat template here, as the ReftChatDataset will do it for us at preprocessing stage
-    train_dataset = ReftChatDataset(task=['benchang1110/Chattw_v2','benchang1110/WildChat-Chinese'],data_path=None,data_split='train',max_n_example=args.samples,
+    train_dataset = ReftChatDataset(task=['benchang1110/medicaltw'],data_path=None,data_split='train',max_n_example=args.samples,
                                     tokenizer=tokenizer, model=reft_model,
                                     **{"num_interventions": len(layers), "position": args.position, 
                                     "share_weights":args.share_weights})
