@@ -34,7 +34,7 @@ parser.add_argument('--resume', default='', help='resume checkpoint')
 parser.add_argument('--save', default='checkpoint', help='path to the folder to save checkpoint')
 parser.add_argument('--export', default='export', help='path to the folder to upload to hub')
 
-parser.add_argument('--epoch', default=1, help='number of epochs to train')
+parser.add_argument('--epoch', default=5, help='number of epochs to train')
 parser.add_argument('--batch_size', default=4, help='batch size')
 parser.add_argument('--lr', default=1e-3, help='learning rate')
 
